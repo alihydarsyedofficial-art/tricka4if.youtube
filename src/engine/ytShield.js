@@ -3,7 +3,7 @@ export const YT_SHIELD_SCRIPT = `
   if (window.__YT_SHIELD_ACTIVE__) return;
   window.__YT_SHIELD_ACTIVE__ = true;
 
-  // ১. সব ইউটিউব অ্যাড, স্পনসর ও পপআপ ব্লক
+  // ১. ইউটিউব অ্যাড, স্পনসর ও পপআপ ব্লক
   const css = document.createElement('style');
   css.textContent = \`
     .ytp-ad-module, .ytp-ad-overlay-container, #masthead-ad,
@@ -16,9 +16,8 @@ export const YT_SHIELD_SCRIPT = `
   \`;
   (document.head || document.documentElement).appendChild(css);
 
-  // ২. প্রি-রোল ও মিড-রোল ভিডিও অ্যাড অটো-স্কিপ / ফাস্ট-ফরওয়ার্ড
+  // ২. ভিডিও অ্যাড অটো-স্কিপ ও ফাস্ট-ফরওয়ার্ড
   let wasAdPlaying = false;
-
   setInterval(() => {
     const video = document.querySelector('video');
     const isAd = Boolean(document.querySelector('.ad-showing, .ad-interrupting'));
@@ -47,7 +46,7 @@ export const YT_SHIELD_SCRIPT = `
     }
   }, 200);
 
-  // ৩. ব্যাকগ্রাউন্ডে গান চালু রাখা (Tab Switch বা Screen Off করলেও পজ হবে না)
+  // ৩. ব্যাকগ্রাউন্ড / স্ক্রিন অফ বা ট্যাব বদলালেও পজ না করা
   try {
     Object.defineProperty(document, 'hidden', { get: () => false });
     Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
@@ -109,3 +108,33 @@ export const YT_SHIELD_SCRIPT = `
   setInterval(mountFloatButton, 1500);
 })();
 `;
+
+export async function turboDirectDownload(fileUrl, filename = 'venom-media.mp4') {
+  const response = await fetch(fileUrl);
+  if (!response.ok || !response.body) {
+    throw new Error('Direct stream unavailable');
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+  }
+
+  const blob = new Blob(chunks);
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+  return received;
+}
