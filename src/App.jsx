@@ -1,24 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { YT_SHIELD_SCRIPT } from './engine/ytShield';
+import { YT_SHIELD_SCRIPT, turboDirectDownload } from './engine/ytShield';
 
 const DEFAULT_VIDEO_ID = 'jfKfPfyJRdk';
 
 const CATEGORIES = [
-  { label: '🏠 Home / Lo-Fi', query: '', videoId: DEFAULT_VIDEO_ID },
+  { label: '🏠 YT Home / Lo-Fi', query: '', videoId: DEFAULT_VIDEO_ID },
   { label: '🎵 Bangla Songs', query: 'bangla hit songs', videoId: '' },
-  { label: '🎬 Movies', query: 'bangla full movie', videoId: '' },
-  { label: '🎧 Chill Beats', query: 'chill lofi beats', videoId: '' },
+  { label: '🎬 Full Movies', query: 'bangla full movie', videoId: '' },
+  { label: '🎧 Chill Beats', query: 'chill lofi radio', videoId: '' },
   { label: '🔥 Trending Mix', query: 'trending music mix', videoId: '' },
 ];
 
 function extractVideoId(input) {
   const text = (input || '').trim();
   if (!text) return '';
-
-  // সরাসরি 11-character YouTube Video ID হলে
-  if (/^[a-zA-Z0-9_-]{11}$/.test(text)) {
-    return text;
-  }
+  if (/^[a-zA-Z0-9_-]{11}$/.test(text)) return text;
 
   try {
     const url = new URL(text.startsWith('http') ? text : `https://${text}`);
@@ -37,18 +33,8 @@ function extractVideoId(input) {
   return '';
 }
 
-function buildPlayerSrc({ videoId, searchQuery, audioOnly }) {
-  const autoplay = '1';
-  const modParams = `autoplay=${autoplay}&rel=0&modestbranding=1&iv_load_policy=3${
-    audioOnly ? '&controls=1' : ''
-  }`;
-
-  if (videoId) {
-    return `https://www.youtube-nocookie.com/embed/${videoId}?${modParams}`;
-  }
-
-  const q = encodeURIComponent((searchQuery || 'lofi hip hop').trim());
-  return `https://www.youtube-nocookie.com/embed?listType=search&list=${q}&${modParams}`;
+function isDirectMediaUrl(rawUrl) {
+  return /\.(mp4|mp3|m4a|webm|ogg|wav)(\?.*)?$/i.test((rawUrl || '').trim());
 }
 
 export default function App() {
@@ -60,14 +46,18 @@ export default function App() {
   const [pinned, setPinned] = useState(false);
   const [floatingCard, setFloatingCard] = useState(false);
   const [floatPos, setFloatPos] = useState({ x: null, y: null });
+
   const [audioOnly, setAudioOnly] = useState(false);
   const [sleepGuard, setSleepGuard] = useState(true);
+  const [turboMode, setTurboMode] = useState(true);
+  const [downloadFormat, setDownloadFormat] = useState('HD-1080p');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('YT Mod Ready • No Login • AdGuard & Sleep Guard Active');
 
   const wvRef = useRef(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const isDesktop = typeof window !== 'undefined' && Boolean(window.require);
 
-  // Desktop Electron Webview-তে ডিফল্ট YouTube + Shield Script
   useEffect(() => {
     const wv = wvRef.current;
     if (!wv) return;
@@ -76,7 +66,6 @@ export default function App() {
     return () => wv.removeEventListener('dom-ready', onReady);
   }, [nativeYtUrl]);
 
-  // Background / Sleep Guard
   useEffect(() => {
     let wakeLock = null;
     async function manageWakeLock() {
@@ -102,6 +91,15 @@ export default function App() {
       setActiveQuery('');
       setActiveVideoId(DEFAULT_VIDEO_ID);
       setNativeYtUrl('https://www.youtube.com');
+      setStatusMsg('Default YouTube Mod loaded');
+      return;
+    }
+
+    if (isDirectMediaUrl(raw)) {
+      setActiveVideoId('');
+      setActiveQuery('');
+      setNativeYtUrl(raw);
+      setStatusMsg(`Direct media loaded: ${raw}`);
       return;
     }
 
@@ -110,21 +108,24 @@ export default function App() {
       setActiveVideoId(vid);
       setActiveQuery('');
       setNativeYtUrl(`https://www.youtube.com/watch?v=${vid}`);
+      setStatusMsg(`Playing Video ID: ${vid}`);
     } else {
-      setActiveVideoId('');
       setActiveQuery(raw);
       setNativeYtUrl(`https://www.youtube.com/results?search_query=${encodeURIComponent(raw)}`);
+      setStatusMsg(`Search ready for "${raw}" — YouTube-এ সরাসরি খুলতে বা প্লে করতে নিচের বাটন ব্যবহার করুন`);
     }
   };
 
   const selectCategory = (cat) => {
     setSearchText(cat.query);
     setActiveQuery(cat.query);
-    setActiveVideoId(cat.videoId || '');
+    setActiveVideoId(cat.videoId || DEFAULT_VIDEO_ID);
     if (cat.query) {
       setNativeYtUrl(`https://www.youtube.com/results?search_query=${encodeURIComponent(cat.query)}`);
+      setStatusMsg(`Category selected: ${cat.label} ("${cat.query}")`);
     } else {
       setNativeYtUrl('https://www.youtube.com');
+      setStatusMsg('Default YouTube Home / Lo-Fi active');
     }
   };
 
@@ -140,7 +141,7 @@ export default function App() {
         if (nextFloat) {
           setFloatPos({
             x: Math.max(16, window.innerWidth - 460),
-            y: Math.max(76, window.innerHeight - 350),
+            y: Math.max(80, window.innerHeight - 350),
           });
         }
         return nextFloat;
@@ -180,37 +181,61 @@ export default function App() {
     window.addEventListener('touchend', onUp);
   };
 
-  const playerSrc = buildPlayerSrc({
-    videoId: activeVideoId,
-    searchQuery: activeQuery,
-    audioOnly,
-  });
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    const ext = downloadFormat === 'MP3-Audio' ? 'mp3' : 'mp4';
+    const fileName = `venom-yt-${Date.now()}.${ext}`;
+    const targetUrl = isDirectMediaUrl(searchText) ? searchText.trim() : nativeYtUrl;
+
+    try {
+      if (isDirectMediaUrl(targetUrl)) {
+        setStatusMsg(`Turbo (${turboMode ? 'Fast Chunk' : 'Standard'}) downloading ${fileName}...`);
+        await turboDirectDownload(targetUrl, fileName);
+        setStatusMsg(`Downloaded to device storage: ${fileName}`);
+      } else {
+        await navigator.clipboard?.writeText(targetUrl).catch(() => {});
+        setStatusMsg(
+          `লিংক কপি হয়েছে (${downloadFormat})। সরাসরি .mp4/.mp3 মিডিয়া লিংক দিলে Turbo Download সরাসরি ফাইল সেভ করবে।`
+        );
+      }
+    } catch {
+      setStatusMsg(
+        `ডাইরেক্ট স্ট্রিম সীমাবদ্ধ। লিংক কপি হয়েছে (${downloadFormat})—এক্সটার্নাল/সার্ভার ডাউনলোডারে পেস্ট করে সেভ করতে পারবেন।`
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const directFile = isDirectMediaUrl(nativeYtUrl);
+  const embedVideoId = activeVideoId || DEFAULT_VIDEO_ID;
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${embedVideoId}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3`;
 
   return (
     <div
       style={{
-        height: '100vh',
+        minHeight: '100vh',
         width: '100vw',
         display: 'flex',
         flexDirection: 'column',
         background: 'radial-gradient(circle at top left, #1e1b4b 0%, #090d16 48%, #05070d 100%)',
         color: '#f8fafc',
         fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-        overflow: 'hidden',
+        overflowX: 'hidden',
       }}
     >
       {/* টপ YouTube Mod বার */}
       <div
         style={{
-          height: '56px',
-          padding: '0 14px',
+          minHeight: '56px',
+          padding: '8px 14px',
           display: 'flex',
+          flexWrap: 'wrap',
           alignItems: 'center',
-          gap: '10px',
+          gap: '8px',
           background: 'rgba(15, 23, 42, 0.9)',
           backdropFilter: 'blur(14px)',
           borderBottom: '1px solid rgba(239, 68, 68, 0.28)',
-          flexShrink: 0,
         }}
       >
         <button
@@ -224,17 +249,15 @@ export default function App() {
             fontWeight: 800,
             fontSize: '12px',
             cursor: 'pointer',
-            whiteSpace: 'nowrap',
           }}
         >
           ▶ YT Mod
         </button>
 
-        {/* ডাইরেক্ট সার্চ বার (লিংক ছাড়াই যেকোনো গান/চ্যানেল/মুভি সার্চ) */}
         <form
           onSubmit={handleSearchOrOpen}
           style={{
-            flex: 1,
+            flex: '1 1 240px',
             display: 'flex',
             alignItems: 'center',
             background: 'rgba(2, 6, 23, 0.9)',
@@ -246,20 +269,20 @@ export default function App() {
           <input
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="যেকোনো গান, চ্যানেল বা মুভি সার্চ করুন (No Login Required)..."
+            placeholder="গান, চ্যানেল, মুভি সার্চ করুন বা YouTube / .mp4/.mp3 লিংক দিন..."
             style={{
               width: '100%',
               background: 'transparent',
               border: 'none',
               outline: 'none',
               color: '#f1f5f9',
-              fontSize: '13px',
+              fontSize: '12.5px',
             }}
           />
           <button
             type="submit"
             style={{
-              background: 'rgba(239, 68, 68, 0.2)',
+              background: 'rgba(239, 68, 68, 0.22)',
               color: '#fca5a5',
               border: '1px solid rgba(239, 68, 68, 0.45)',
               borderRadius: '999px',
@@ -284,10 +307,9 @@ export default function App() {
             fontSize: '11.5px',
             fontWeight: 600,
             cursor: 'pointer',
-            whiteSpace: 'nowrap',
           }}
         >
-          🎵 {audioOnly ? 'Audio ON' : 'Audio'}
+          🎵 {audioOnly ? 'MP3 ON' : 'MP3 Mode'}
         </button>
 
         <button
@@ -301,10 +323,9 @@ export default function App() {
             fontSize: '11.5px',
             fontWeight: 600,
             cursor: 'pointer',
-            whiteSpace: 'nowrap',
           }}
         >
-          🛡️ {sleepGuard ? 'Mod ON' : 'Mod OFF'}
+          🌙 {sleepGuard ? 'Sleep ON' : 'Sleep OFF'}
         </button>
 
         <button
@@ -318,68 +339,171 @@ export default function App() {
             fontSize: '12px',
             fontWeight: 700,
             cursor: 'pointer',
-            whiteSpace: 'nowrap',
           }}
         >
           {pinned || floatingCard ? '📌 Floating ON' : '📌 Float'}
         </button>
       </div>
 
-      {/* ক্যাটাগরি শর্টকাট বার */}
+      {/* ক্যাটাগরি ও Turbo Download বার */}
       <div
         style={{
           padding: '8px 14px',
           display: 'flex',
+          flexWrap: 'wrap',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: '8px',
           background: 'rgba(15, 23, 42, 0.65)',
           borderBottom: '1px solid rgba(148, 163, 184, 0.14)',
-          overflowX: 'auto',
-          flexShrink: 0,
         }}
       >
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.label}
-            onClick={() => selectCategory(cat)}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat.label}
+              onClick={() => selectCategory(cat)}
+              style={{
+                background: 'rgba(30, 41, 59, 0.85)',
+                color: '#f1f5f9',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '8px',
+                padding: '5px 10px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {cat.label}
+            </button>
+          ))}
+
+          <a
+            href={nativeYtUrl}
+            target="_blank"
+            rel="noreferrer"
             style={{
-              background: 'rgba(30, 41, 59, 0.85)',
-              color: '#f1f5f9',
-              border: '1px solid rgba(239, 68, 68, 0.25)',
-              borderRadius: '8px',
-              padding: '5px 11px',
+              color: '#38bdf8',
               fontSize: '11.5px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
+              textDecoration: 'none',
+              padding: '4px 8px',
             }}
           >
-            {cat.label}
-          </button>
-        ))}
+            ↗ Open YouTube
+          </a>
+        </div>
 
-        <a
-          href={nativeYtUrl}
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            marginLeft: 'auto',
-            color: '#38bdf8',
-            fontSize: '11.5px',
-            textDecoration: 'none',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          ↗ Open YouTube
-        </a>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+          <select
+            value={downloadFormat}
+            onChange={(e) => setDownloadFormat(e.target.value)}
+            style={{
+              background: '#020617',
+              color: '#e2e8f0',
+              border: '1px solid rgba(148, 163, 184, 0.35)',
+              borderRadius: '8px',
+              padding: '5px 8px',
+              fontSize: '11px',
+            }}
+          >
+            <option value="HD-1080p">HD 1080p</option>
+            <option value="MP3-Audio">MP3 Audio</option>
+          </select>
+
+          <button
+            onClick={() => setTurboMode((prev) => !prev)}
+            style={{
+              background: turboMode ? 'rgba(245, 158, 11, 0.2)' : 'rgba(30, 41, 59, 0.8)',
+              color: turboMode ? '#fbbf24' : '#94a3b8',
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              borderRadius: '8px',
+              padding: '5px 8px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            ⚡ Turbo {turboMode ? 'ON' : 'OFF'}
+          </button>
+
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            style={{
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#03130d',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '5px 11px',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            {isDownloading ? 'Saving...' : '⬇ Download'}
+          </button>
+        </div>
       </div>
 
-      {/* মেইন YouTube প্লেয়ার / ফ্লোটিং উইন্ডো */}
-      <div style={{ flex: 1, position: 'relative', padding: '12px' }}>
+      {/* স্ট্যাটাস বার */}
+      <div
+        style={{
+          padding: '5px 14px',
+          fontSize: '11px',
+          color: '#94a3b8',
+          background: 'rgba(2, 6, 23, 0.7)',
+          borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+        }}
+      >
+        {statusMsg}
+      </div>
+
+      {/* সার্চ কুইক-লঞ্চ ব্যানার (যখন কোনো কিওয়ার্ড সার্চ করা হয়, যাতে embed unavailable না দেখায়) */}
+      {activeQuery && !isDesktop && (
+        <div
+          style={{
+            margin: '10px 12px 0',
+            padding: '10px 14px',
+            borderRadius: '12px',
+            background: 'rgba(30, 41, 59, 0.85)',
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            fontSize: '12px',
+          }}
+        >
+          <span>
+            🔍 Search Query: <strong>{activeQuery}</strong> — সরাসরি YouTube রেজাল্ট খুলতে বা নিচের প্লেয়ারে স্ট্রিম চালান।
+          </span>
+          <a
+            href={`https://www.youtube.com/results?search_query=${encodeURIComponent(activeQuery)}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: '#ef4444',
+              color: '#fff',
+              padding: '5px 12px',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              fontWeight: 700,
+              fontSize: '11.5px',
+            }}
+          >
+            ▶ YouTube-এ সার্চ খুলুন
+          </a>
+        </div>
+      )}
+
+      {/* মেইন প্লেয়ার / ফ্লোটিং উইন্ডো */}
+      <div style={{ flex: 1, position: 'relative', padding: '12px', minHeight: '400px' }}>
         <div
           style={{
             width: floatingCard ? 'min(440px, 92vw)' : '100%',
             height: floatingCard ? '265px' : audioOnly ? '170px' : '100%',
+            minHeight: audioOnly ? '150px' : '360px',
             position: floatingCard ? 'fixed' : 'relative',
             left: floatingCard && floatPos.x !== null ? `${floatPos.x}px` : 'auto',
             top: floatingCard && floatPos.y !== null ? `${floatPos.y}px` : 'auto',
@@ -439,9 +563,16 @@ export default function App() {
                 allowpopups="true"
                 useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
               />
+            ) : directFile ? (
+              <video
+                src={nativeYtUrl}
+                controls
+                autoPlay
+                style={{ width: '100%', height: '100%', background: '#000' }}
+              />
             ) : (
               <iframe
-                src={playerSrc}
+                src={embedUrl}
                 title="YT Mod Player"
                 style={{ width: '100%', height: '100%', border: 'none' }}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -462,7 +593,7 @@ export default function App() {
               fontSize: '13px',
             }}
           >
-            YT Floating Mode সক্রিয় — নিচে/পাশে ড্র্যাগ করে যেকোনো জায়গায় সরাতে পারেন।
+            YT Floating Mode সক্রিয় — প্লেয়ারটি ড্র্যাগ করে যেকোনো জায়গায় সরাতে পারেন।
           </div>
         )}
       </div>
