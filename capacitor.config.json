@@ -1,0 +1,8 @@
+{
+  "appId": "com.tricka4if.venomyt",
+  "appName": "YT Pure Float",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
