@@ -1,49 +1,74 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { YT_SHIELD_SCRIPT } from './engine/ytShield';
 
-const QUICK_PICKS = [
-  { label: 'YT Home', url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk' },
-  { label: 'Lo-Fi Beats', url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk' },
-  { label: 'Bangla Music', url: 'bangla song playlist' },
-  { label: 'Movies', url: 'full movie' },
+const DEFAULT_YT_HOME = 'https://www.youtube.com';
+
+const QUICK_SEARCHES = [
+  { label: 'YT Home', query: '' },
+  { label: 'Bangla Songs', query: 'bangla song' },
+  { label: 'Lo-Fi Beats', query: 'lofi hip hop radio' },
+  { label: 'Movies', query: 'full movie' },
 ];
 
-function toEmbedUrl(rawUrl) {
-  const trimmed = (rawUrl || '').trim();
-  if (!trimmed) {
-    return 'https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=1&rel=0';
+function buildYouTubeTarget(input, isDesktop) {
+  const raw = (input || '').trim();
+  if (!raw) {
+    return isDesktop
+      ? DEFAULT_YT_HOME
+      : 'https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=1&rel=0';
   }
 
-  try {
-    const u = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
-    if (u.hostname.includes('youtu.be')) {
-      const id = u.pathname.replace('/', '');
-      if (id) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
-    }
-    if (u.hostname.includes('youtube.com')) {
-      const id = u.searchParams.get('v');
-      if (id) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
-      const q = u.searchParams.get('search_query');
-      if (q) {
-        return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(q)}`;
+  const looksLikeUrl =
+    /^https?:\/\//i.test(raw) ||
+    raw.includes('youtube.com') ||
+    raw.includes('youtu.be');
+
+  if (looksLikeUrl) {
+    const fullUrl = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    if (isDesktop) return fullUrl;
+
+    try {
+      const u = new URL(fullUrl);
+      if (u.hostname.includes('youtu.be')) {
+        const id = u.pathname.replace('/', '');
+        if (id) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
       }
+      if (u.hostname.includes('youtube.com')) {
+        const vid = u.searchParams.get('v');
+        if (vid) return `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&rel=0`;
+        const q = u.searchParams.get('search_query');
+        if (q) {
+          return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(q)}`;
+        }
+      }
+    } catch {
+      // fallback below
     }
-    return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(trimmed)}`;
-  } catch {
-    return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(trimmed)}`;
+    return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(raw)}`;
   }
+
+  // বাইরে থেকে লিংক না দিলেও সরাসরি সার্চ করে YouTube-এ নিয়ে যাবে
+  if (isDesktop) {
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(raw)}`;
+  }
+  return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(raw)}`;
 }
 
 export default function App() {
-  const [query, setQuery] = useState('https://www.youtube.com/watch?v=jfKfPfyJRdk');
-  const [ytUrl, setYtUrl] = useState('https://www.youtube.com/watch?v=jfKfPfyJRdk');
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.require);
+
+  const [searchText, setSearchText] = useState('');
+  const [activeSrc, setActiveSrc] = useState(() => buildYouTubeTarget('', isDesktop));
   const [pinned, setPinned] = useState(false);
   const [floatingCard, setFloatingCard] = useState(false);
   const [floatPos, setFloatPos] = useState({ x: null, y: null });
 
   const wvRef = useRef(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const isDesktop = typeof window !== 'undefined' && Boolean(window.require);
+
+  useEffect(() => {
+    setActiveSrc(buildYouTubeTarget(searchText, isDesktop));
+  }, [isDesktop]);
 
   useEffect(() => {
     const wv = wvRef.current;
@@ -51,16 +76,16 @@ export default function App() {
     const onReady = () => wv.executeJavaScript(YT_SHIELD_SCRIPT);
     wv.addEventListener('dom-ready', onReady);
     return () => wv.removeEventListener('dom-ready', onReady);
-  }, [ytUrl]);
+  }, [activeSrc]);
 
-  const goYouTube = (e) => {
+  const handleDirectSearch = (e) => {
     e.preventDefault();
-    const val = query.trim();
-    if (!val) return;
-    const next = val.startsWith('http')
-      ? val
-      : `https://www.youtube.com/results?search_query=${encodeURIComponent(val)}`;
-    setYtUrl(next);
+    setActiveSrc(buildYouTubeTarget(searchText, isDesktop));
+  };
+
+  const runQuickSearch = (q) => {
+    setSearchText(q);
+    setActiveSrc(buildYouTubeTarget(q, isDesktop));
   };
 
   const togglePinFloat = () => {
@@ -154,7 +179,7 @@ export default function App() {
         overflow: 'hidden',
       }}
     >
-      {/* প্রিমিয়াম টপ নেভিগেশন বার */}
+      {/* ডিফল্ট YouTube কানেক্টেড টপ সার্চ বার */}
       <div
         style={{
           height: '54px',
@@ -162,18 +187,15 @@ export default function App() {
           display: 'flex',
           alignItems: 'center',
           gap: '10px',
-          background: 'rgba(15, 23, 42, 0.85)',
+          background: 'rgba(15, 23, 42, 0.88)',
           backdropFilter: 'blur(14px)',
           borderBottom: '1px solid rgba(56, 189, 248, 0.22)',
           flexShrink: 0,
         }}
       >
         <button
-          onClick={() => {
-            const home = 'https://www.youtube.com/watch?v=jfKfPfyJRdk';
-            setQuery(home);
-            setYtUrl(home);
-          }}
+          type="button"
+          onClick={() => runQuickSearch('')}
           style={{
             background: 'linear-gradient(135deg, #ef4444, #dc2626)',
             color: '#fff',
@@ -187,25 +209,25 @@ export default function App() {
             whiteSpace: 'nowrap',
           }}
         >
-          ▶ YT Pure
+          ▶ YouTube
         </button>
 
         <form
-          onSubmit={goYouTube}
+          onSubmit={handleDirectSearch}
           style={{
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            background: 'rgba(2, 6, 23, 0.85)',
-            border: '1px solid rgba(148, 163, 184, 0.25)',
+            background: 'rgba(2, 6, 23, 0.9)',
+            border: '1px solid rgba(148, 163, 184, 0.28)',
             borderRadius: '999px',
             padding: '4px 12px',
           }}
         >
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="YouTube লিংক বা সার্চ কিওয়ার্ড লিখুন..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="লগইন ছাড়াই YouTube-এ সার্চ করুন (যেমন: bangla song, movie)..."
             style={{
               width: '100%',
               background: 'transparent',
@@ -218,17 +240,17 @@ export default function App() {
           <button
             type="submit"
             style={{
-              background: 'rgba(34, 211, 238, 0.16)',
+              background: 'rgba(34, 211, 238, 0.18)',
               color: '#22d3ee',
-              border: '1px solid rgba(34, 211, 238, 0.35)',
+              border: '1px solid rgba(34, 211, 238, 0.4)',
               borderRadius: '999px',
-              padding: '4px 10px',
+              padding: '4px 12px',
               fontSize: '11px',
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
             }}
           >
-            Go
+            Search
           </button>
         </form>
 
@@ -244,10 +266,11 @@ export default function App() {
             whiteSpace: 'nowrap',
           }}
         >
-          🛡️ DNS Shield ON
+          No Login • Shield ON
         </div>
 
         <button
+          type="button"
           onClick={popOutVideo}
           style={{
             background: 'linear-gradient(135deg, #22d3ee, #3b82f6)',
@@ -265,6 +288,7 @@ export default function App() {
         </button>
 
         <button
+          type="button"
           onClick={togglePinFloat}
           style={{
             background: pinned || floatingCard ? '#fbbf24' : 'rgba(30, 41, 59, 0.9)',
@@ -282,7 +306,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* শর্টকাট কুইক-বার */}
+      {/* কুইক সার্চ শর্টকাট বার */}
       <div
         style={{
           padding: '8px 14px',
@@ -295,19 +319,14 @@ export default function App() {
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: '11px', color: '#94a3b8' }}>Quick:</span>
-        {QUICK_PICKS.map((item) => (
+        <span style={{ fontSize: '11px', color: '#94a3b8' }}>Instant:</span>
+        {QUICK_SEARCHES.map((item) => (
           <button
             key={item.label}
-            onClick={() => {
-              const target = item.url.startsWith('http')
-                ? item.url
-                : `https://www.youtube.com/results?search_query=${encodeURIComponent(item.url)}`;
-              setQuery(target);
-              setYtUrl(target);
-            }}
+            type="button"
+            onClick={() => runQuickSearch(item.query)}
             style={{
-              background: 'rgba(30, 41, 59, 0.75)',
+              background: 'rgba(30, 41, 59, 0.78)',
               color: '#e2e8f0',
               border: '1px solid rgba(56, 189, 248, 0.2)',
               borderRadius: '8px',
@@ -322,7 +341,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* মেইন কন্টেন্ট / ফ্লোটিং উইন্ডো এরিয়া */}
+      {/* মেইন YouTube প্লেয়ার / ফ্লোটিং এরিয়া */}
       <div style={{ flex: 1, position: 'relative', padding: '12px' }}>
         <div
           style={{
@@ -363,6 +382,7 @@ export default function App() {
             >
               <span>⋮⋮ Drag Float Window</span>
               <button
+                type="button"
                 onClick={() => setFloatingCard(false)}
                 style={{
                   background: 'transparent',
@@ -382,15 +402,15 @@ export default function App() {
             {isDesktop ? (
               <webview
                 ref={wvRef}
-                src={ytUrl}
+                src={activeSrc}
                 style={{ width: '100%', height: '100%' }}
                 allowpopups="true"
                 useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
               />
             ) : (
               <iframe
-                src={toEmbedUrl(ytUrl)}
-                title="YT Pure Player"
+                src={activeSrc}
+                title="YouTube Default Player"
                 style={{ width: '100%', height: '100%', border: 'none' }}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
@@ -410,7 +430,7 @@ export default function App() {
               fontSize: '13px',
             }}
           >
-            Floating Mini Mode সক্রিয় আছে — প্লেয়ারটি ড্র্যাগ করে যেকোনো জায়গায় সরাতে পারেন।
+            Floating Mini Mode সক্রিয় — বাইরে থেকে লিংক না দিয়েই ভেতর থেকে সার্চ ও প্লে করতে পারেন।
           </div>
         )}
       </div>
