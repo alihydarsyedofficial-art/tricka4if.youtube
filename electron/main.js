@@ -1,78 +1,131 @@
 const { app, BrowserWindow, session, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
-// ব্যাকগ্রাউন্ডে ডিফল্ট AdGuard DNS-over-HTTPS
-app.commandLine.appendSwitch('enable-features', 'DnsOverHttps');
+// Enable AdGuard DNS-over-HTTPS & uninterrupted background media playback
 app.commandLine.appendSwitch('dns-over-https-mode', 'secure');
 app.commandLine.appendSwitch('dns-over-https-templates', 'https://dns.adguard-dns.com/dns-query');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
-const AD_HOSTS = [
-  '*://*.doubleclick.net/*',
-  '*://*.googleadservices.com/*',
-  '*://*.googlesyndication.com/*',
-  '*://*.youtube.com/api/stats/ads*',
-  '*://*.youtube.com/pagead/*',
-  '*://*.youtube.com/ptracking*'
+const AD_BLOCK_PATTERNS = [
+  /doubleclick\.net/i,
+  /googlesyndication\.com/i,
+  /googleadservices\.com/i,
+  /adservice\.google\./i,
+  /imasdk\.googleapis\.com/i,
+  /youtube\.com\/api\/stats\/ads/i,
+  /youtube\.com\/pagead\//i,
+  /youtube\.com\/ptracking/i,
+  /youtube\.com\/get_midroll_info/i,
+  /youtube\.com\/pcs\/activeview/i,
+  /youtube\.com\/error_204\?.*ad/i,
+  /s0\.2mdn\.net/i,
+  /static\.doubleclick\.net/i
 ];
 
+function isBlockedAdUrl(url) {
+  return AD_BLOCK_PATTERNS.some((pattern) => pattern.test(url));
+}
+
 function attachAdBlockerToSession(targetSession) {
-  if (!targetSession || !targetSession.webRequest) return;
-  targetSession.webRequest.onBeforeRequest({ urls: AD_HOSTS }, (details, cb) => {
-    cb({ cancel: true });
+  if (!targetSession || targetSession.__venomAdBlockerAttached) return;
+  targetSession.__venomAdBlockerAttached = true;
+
+  targetSession.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+    if (isBlockedAdUrl(details.url)) {
+      callback({ cancel: true });
+    } else {
+      callback({ cancel: false });
+    }
   });
 }
 
-let win;
+let mainWindow = null;
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: 1200,
-    height: 760,
-    minWidth: 340,
-    minHeight: 200,
-    autoHideMenuBar: true,
+function createMainWindow() {
+  const preloadPath = path.join(__dirname, 'preload.js');
+  const hasPreload = fs.existsSync(preloadPath);
+
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 360,
+    minHeight: 220,
     backgroundColor: '#09090b',
+    autoHideMenuBar: true,
+    title: 'YT Pure Float — Venom YT Mod',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webviewTag: true
+      preload: hasPreload ? preloadPath : undefined,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: true,
+      backgroundThrottling: false
     }
   });
 
-  attachAdBlockerToSession(session.defaultSession);
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) {
+    mainWindow.loadURL(devUrl);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  }
 
-  const url =
-    process.env.ELECTRON_START_URL ||
-    `file://${path.join(__dirname, '../dist/index.html')}`;
-  win.loadURL(url);
-
-  win.on('closed', () => {
-    win = null;
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 }
 
-// webview সহ যেকোনো নতুন webContents-এ অ্যাড ব্লক সক্রিয় রাখা
-app.on('web-contents-created', (_, contents) => {
-  attachAdBlockerToSession(contents.session);
-});
-
-ipcMain.on('set-float-mode', (_, floating) => {
-  if (!win || win.isDestroyed()) return;
-  const isFloat = Boolean(floating);
-  win.setAlwaysOnTop(isFloat, 'floating');
-  if (isFloat) {
-    win.setSize(460, 270);
-  } else {
-    win.setSize(1200, 760);
+// Safely handle Always-On-Top Floating Mini-Player Mode
+ipcMain.on('set-float-mode', (_event, enabled) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const isFloating = Boolean(enabled);
+    if (isFloating) {
+      if (mainWindow.isMaximized()) mainWindow.unmaximize();
+      mainWindow.setAlwaysOnTop(true, 'floating');
+      mainWindow.setSize(440, 290, true);
+    } else {
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setSize(1280, 820, true);
+      mainWindow.center();
+    }
+  } catch (_) {
+    // Prevent window state exceptions on unsupported window managers
   }
 });
 
 app.whenReady().then(() => {
-  createWindow();
+  attachAdBlockerToSession(session.defaultSession);
+  attachAdBlockerToSession(session.fromPartition('persist:ytpure'));
+
+  app.on('session-created', (newSession) => {
+    attachAdBlockerToSession(newSession);
+  });
+
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.session) {
+      attachAdBlockerToSession(contents.session);
+    }
+    contents.setWindowOpenHandler(({ url }) => {
+      if (isBlockedAdUrl(url)) {
+        return { action: 'deny' };
+      }
+      if (contents.getType() === 'webview') {
+        contents.loadURL(url);
+        return { action: 'deny' };
+      }
+      return { action: 'allow' };
+    });
+  });
+
+  createMainWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createMainWindow();
     }
   });
 });
