@@ -3,6 +3,16 @@
   "appName": "YT Pure Float",
   "webDir": "dist",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*.youtube.com",
+      "*.youtu.be",
+      "*.googlevideo.com",
+      "*.ytimg.com"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#09090b"
   }
 }
