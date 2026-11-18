@@ -3,6 +3,7 @@ name: Build YT Float Branch
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -33,8 +34,11 @@ jobs:
           java-version: '17'
       - run: npm install
       - run: npm run build
-      - run: npx cap add android
-      - run: cp android-native/MainActivity.kt android/app/src/main/java/com/tricka4if/venomyt/MainActivity.kt
+      - run: npx cap add android "YT Pure Float" --app-id com.tricka4if.venomyt
+      - run: |
+          mkdir -p android/app/src/main/java/com/tricka4if/venomyt
+          cp android-native/MainActivity.kt android/app/src/main/java/com/tricka4if/venomyt/MainActivity.kt
+          sed -i 's/<activity /<activity android:supportsPictureInPicture="true" android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" /g' android/app/src/main/AndroidManifest.xml
       - run: npx cap sync android
       - run: cd android && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
