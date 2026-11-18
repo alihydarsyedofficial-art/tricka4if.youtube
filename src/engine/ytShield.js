@@ -14,57 +14,98 @@ export const YT_SHIELD_SCRIPT = `
       height: 0 !important;
     }
   \`;
-  document.head.appendChild(css);
+  (document.head || document.documentElement).appendChild(css);
 
-  // ২. প্রি-রোল ও মিড-রোল ভিডিও অ্যাড অটো-স্কিপ / ফাস্ট-ফরওয়ার্ড
+  // ২. প্রি-রোল ও মিড-রোল ভিডিও অ্যাড অটো-স্কিপ / ফাস্ট-ফরওয়ার্ড
+  let wasAdPlaying = false;
+
   setInterval(() => {
     const video = document.querySelector('video');
-    const isAd = document.querySelector('.ad-showing, .ad-interrupting');
+    const isAd = Boolean(document.querySelector('.ad-showing, .ad-interrupting'));
+
     if (isAd && video) {
+      wasAdPlaying = true;
       video.muted = true;
-      if (isFinite(video.duration)) video.currentTime = video.duration;
-      video.playbackRate = 16.0;
+      if (isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = video.duration;
+      }
+      try {
+        video.playbackRate = 16.0;
+      } catch {}
+    } else if (wasAdPlaying && video) {
+      wasAdPlaying = false;
+      try {
+        if (video.playbackRate === 16.0) video.playbackRate = 1.0;
+      } catch {}
     }
-    const skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
-    if (skip) skip.click();
+
+    const skip = document.querySelector(
+      '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button'
+    );
+    if (skip && typeof skip.click === 'function') {
+      skip.click();
+    }
   }, 200);
 
   // ৩. ব্যাকগ্রাউন্ডে গান চালু রাখা (Tab Switch বা Screen Off করলেও পজ হবে না)
-  Object.defineProperty(document, 'hidden', { get: () => false });
-  Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
-  document.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
+  try {
+    Object.defineProperty(document, 'hidden', { get: () => false });
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+  } catch {}
+  document.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
 
   // ৪. ফ্লোটিং PiP বাটন (1080p লকসহ)
-  const floatBtn = document.createElement('button');
-  floatBtn.innerHTML = '▶ Float YT';
-  Object.assign(floatBtn.style, {
-    position: 'fixed',
-    bottom: '76px',
-    right: '16px',
-    zIndex: '999999',
-    padding: '9px 15px',
-    borderRadius: '999px',
-    border: 'none',
-    background: '#ef4444',
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: '12px',
-    boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
-    cursor: 'pointer'
-  });
+  function mountFloatButton() {
+    const targetParent = document.body || document.documentElement;
+    if (!targetParent || document.getElementById('venom-yt-float-btn')) return;
 
-  floatBtn.onclick = async () => {
-    const v = document.querySelector('video');
-    const player = document.getElementById('movie_player');
-    if (player && player.setPlaybackQualityRange) {
-      player.setPlaybackQualityRange('hd1080', 'hd1080');
-    }
-    if (v && v.requestPictureInPicture) {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await v.requestPictureInPicture();
-    }
-  };
+    const floatBtn = document.createElement('button');
+    floatBtn.id = 'venom-yt-float-btn';
+    floatBtn.type = 'button';
+    floatBtn.innerHTML = '▶ Float YT';
+    Object.assign(floatBtn.style, {
+      position: 'fixed',
+      bottom: '76px',
+      right: '16px',
+      zIndex: '999999',
+      padding: '9px 15px',
+      borderRadius: '999px',
+      border: 'none',
+      background: '#ef4444',
+      color: '#fff',
+      fontWeight: '700',
+      fontSize: '12px',
+      boxShadow: '0 6px 20px rgba(239,68,68,0.45)',
+      cursor: 'pointer'
+    });
 
-  setTimeout(() => document.body.appendChild(floatBtn), 1500);
+    floatBtn.onclick = async () => {
+      const v = document.querySelector('video');
+      const player = document.getElementById('movie_player');
+      try {
+        if (player?.setPlaybackQualityRange) {
+          player.setPlaybackQualityRange('hd1080', 'hd1080');
+        } else if (player?.setPlaybackQuality) {
+          player.setPlaybackQuality('hd1080');
+        }
+      } catch {}
+
+      try {
+        if (v && v.requestPictureInPicture) {
+          if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+          } else {
+            await v.requestPictureInPicture();
+          }
+        }
+      } catch (err) {
+        console.warn('PiP trigger failed:', err);
+      }
+    };
+
+    targetParent.appendChild(floatBtn);
+  }
+
+  setInterval(mountFloatButton, 1500);
 })();
 `;
