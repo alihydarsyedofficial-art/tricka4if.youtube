@@ -2,26 +2,35 @@ import React, { useState, useEffect, useRef } from 'react';
 import { YT_SHIELD_SCRIPT } from './engine/ytShield';
 
 const QUICK_PICKS = [
-  { label: 'YT Home', url: 'https://www.youtube.com' },
-  { label: 'Lo-Fi Beats', url: 'https://www.youtube.com/results?search_query=lofi+hip+hop+radio' },
-  { label: 'Bangla Music', url: 'https://www.youtube.com/results?search_query=bangla+song+playlist' },
-  { label: 'Movies', url: 'https://www.youtube.com/results?search_query=full+movie' },
+  { label: 'YT Home', url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk' },
+  { label: 'Lo-Fi Beats', url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk' },
+  { label: 'Bangla Music', url: 'bangla song playlist' },
+  { label: 'Movies', url: 'full movie' },
 ];
 
 function toEmbedUrl(rawUrl) {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) {
+    return 'https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=1&rel=0';
+  }
+
   try {
-    const u = new URL(rawUrl);
+    const u = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
     if (u.hostname.includes('youtu.be')) {
       const id = u.pathname.replace('/', '');
-      return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+      if (id) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
     }
-    if (u.hostname.includes('youtube.com') && u.searchParams.get('v')) {
+    if (u.hostname.includes('youtube.com')) {
       const id = u.searchParams.get('v');
-      return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+      if (id) return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+      const q = u.searchParams.get('search_query');
+      if (q) {
+        return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(q)}`;
+      }
     }
-    return rawUrl;
+    return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(trimmed)}`;
   } catch {
-    return 'https://www.youtube-nocookie.com/embed?listType=search&list=music';
+    return `https://www.youtube-nocookie.com/embed?listType=search&list=${encodeURIComponent(trimmed)}`;
   }
 }
 
@@ -30,7 +39,10 @@ export default function App() {
   const [ytUrl, setYtUrl] = useState('https://www.youtube.com/watch?v=jfKfPfyJRdk');
   const [pinned, setPinned] = useState(false);
   const [floatingCard, setFloatingCard] = useState(false);
+  const [floatPos, setFloatPos] = useState({ x: null, y: null });
+
   const wvRef = useRef(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
   const isDesktop = typeof window !== 'undefined' && Boolean(window.require);
 
   useEffect(() => {
@@ -58,7 +70,16 @@ export default function App() {
       const { ipcRenderer } = window.require('electron');
       ipcRenderer.send('set-float-mode', next);
     } else {
-      setFloatingCard((prev) => !prev);
+      setFloatingCard((prev) => {
+        const nextFloat = !prev;
+        if (nextFloat) {
+          setFloatPos({
+            x: Math.max(16, window.innerWidth - 460),
+            y: Math.max(70, window.innerHeight - 350),
+          });
+        }
+        return nextFloat;
+      });
     }
   };
 
@@ -71,8 +92,53 @@ export default function App() {
         })();
       `);
     } else {
-      setFloatingCard((prev) => !prev);
+      setFloatingCard((prev) => {
+        const nextFloat = !prev;
+        if (nextFloat) {
+          setFloatPos({
+            x: Math.max(16, window.innerWidth - 460),
+            y: Math.max(70, window.innerHeight - 350),
+          });
+        }
+        return nextFloat;
+      });
     }
+  };
+
+  const startDragFloat = (e) => {
+    if (!floatingCard || isDesktop) return;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const currentX = floatPos.x ?? 20;
+    const currentY = floatPos.y ?? 80;
+
+    dragOffsetRef.current = {
+      x: clientX - currentX,
+      y: clientY - currentY,
+    };
+
+    const onMove = (moveEvent) => {
+      const mx = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const my = moveEvent.touches ? moveEvent.touches[0].clientY : moveEvent.clientY;
+      const maxX = Math.max(8, window.innerWidth - 448);
+      const maxY = Math.max(60, window.innerHeight - 280);
+      setFloatPos({
+        x: Math.min(maxX, Math.max(8, mx - dragOffsetRef.current.x)),
+        y: Math.min(maxY, Math.max(60, my - dragOffsetRef.current.y)),
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onUp);
   };
 
   return (
@@ -88,7 +154,7 @@ export default function App() {
         overflow: 'hidden',
       }}
     >
-      {/* প্রিমিয়াম টপ নেভিগেশন বার */}
+      {/* প্রিমিয়াম টপ নেভিগেশন বার */}
       <div
         style={{
           height: '54px',
@@ -139,7 +205,7 @@ export default function App() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="YouTube লিংক বা সার্চ কিওয়ার্ড লিখুন..."
+            placeholder="YouTube লিংক বা সার্চ কিওয়ার্ড লিখুন..."
             style={{
               width: '100%',
               background: 'transparent',
@@ -234,8 +300,11 @@ export default function App() {
           <button
             key={item.label}
             onClick={() => {
-              setQuery(item.url);
-              setYtUrl(item.url);
+              const target = item.url.startsWith('http')
+                ? item.url
+                : `https://www.youtube.com/results?search_query=${encodeURIComponent(item.url)}`;
+              setQuery(target);
+              setYtUrl(target);
             }}
             style={{
               background: 'rgba(30, 41, 59, 0.75)',
@@ -253,15 +322,15 @@ export default function App() {
         ))}
       </div>
 
-      {/* মেইন কন্টেন্ট / ফ্লোটিং উইন্ডো এরিয়া */}
+      {/* মেইন কন্টেন্ট / ফ্লোটিং উইন্ডো এরিয়া */}
       <div style={{ flex: 1, position: 'relative', padding: '12px' }}>
         <div
           style={{
-            width: floatingCard ? '440px' : '100%',
+            width: floatingCard ? 'min(440px, 92vw)' : '100%',
             height: floatingCard ? '265px' : '100%',
             position: floatingCard ? 'fixed' : 'relative',
-            right: floatingCard ? '20px' : 'auto',
-            bottom: floatingCard ? '20px' : 'auto',
+            left: floatingCard && floatPos.x !== null ? `${floatPos.x}px` : 'auto',
+            top: floatingCard && floatPos.y !== null ? `${floatPos.y}px` : 'auto',
             zIndex: floatingCard ? 999 : 1,
             borderRadius: '16px',
             overflow: 'hidden',
@@ -270,26 +339,64 @@ export default function App() {
               ? '0 20px 50px rgba(0, 0, 0, 0.85), 0 0 24px rgba(34, 211, 238, 0.25)'
               : '0 12px 32px rgba(0, 0, 0, 0.5)',
             background: '#000',
-            transition: 'all 0.25s ease',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          {isDesktop ? (
-            <webview
-              ref={wvRef}
-              src={ytUrl}
-              style={{ width: '100%', height: '100%' }}
-              allowpopups="true"
-              useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            />
-          ) : (
-            <iframe
-              src={toEmbedUrl(ytUrl)}
-              title="YT Pure Player"
-              style={{ width: '100%', height: '100%', border: 'none' }}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
+          {floatingCard && !isDesktop && (
+            <div
+              onMouseDown={startDragFloat}
+              onTouchStart={startDragFloat}
+              style={{
+                height: '28px',
+                padding: '0 10px',
+                background: 'rgba(15, 23, 42, 0.95)',
+                borderBottom: '1px solid rgba(56, 189, 248, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'move',
+                fontSize: '11px',
+                color: '#cbd5e1',
+                userSelect: 'none',
+              }}
+            >
+              <span>⋮⋮ Drag Float Window</span>
+              <button
+                onClick={() => setFloatingCard(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#f87171',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
           )}
+
+          <div style={{ flex: 1, width: '100%', height: '100%' }}>
+            {isDesktop ? (
+              <webview
+                ref={wvRef}
+                src={ytUrl}
+                style={{ width: '100%', height: '100%' }}
+                allowpopups="true"
+                useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+              />
+            ) : (
+              <iframe
+                src={toEmbedUrl(ytUrl)}
+                title="YT Pure Player"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            )}
+          </div>
         </div>
 
         {floatingCard && (
@@ -303,7 +410,7 @@ export default function App() {
               fontSize: '13px',
             }}
           >
-            Floating Mini Mode সক্রিয় আছে — নিচের ডান কোণায় প্লেয়ারটি ভাসছে।
+            Floating Mini Mode সক্রিয় আছে — প্লেয়ারটি ড্র্যাগ করে যেকোনো জায়গায় সরাতে পারেন।
           </div>
         )}
       </div>
